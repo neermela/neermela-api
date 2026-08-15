@@ -93,7 +93,7 @@ r.delete('/me', requireAuth, async (req, res, next) => {
   try {
     // Soft-delete + schedule purge per retention policy (spec §67).
     await query(`UPDATE users.users SET account_status='deletion_scheduled', updated_at=now() WHERE user_id=$1`, [req.auth.userId]);
-    await query(`UPDATE auth.sessions SET status='revoked' WHERE user_id=$1`, [req.auth.userId]);
+    await query(`UPDATE nm_auth.sessions SET status='revoked' WHERE user_id=$1`, [req.auth.userId]);
     ok(res, { scheduled: true });
   } catch (e) { next(e); }
 });

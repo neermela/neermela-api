@@ -1,7 +1,7 @@
 -- NeerMela API — PostgreSQL schema (spec §23). Domain-separated via schemas.
 -- Cloud Storage holds blobs; the database holds metadata only (spec §92).
 
-CREATE SCHEMA IF NOT EXISTS auth;
+CREATE SCHEMA IF NOT EXISTS nm_auth;
 CREATE SCHEMA IF NOT EXISTS users;
 CREATE SCHEMA IF NOT EXISTS messaging;
 CREATE SCHEMA IF NOT EXISTS media;
@@ -31,7 +31,7 @@ CREATE INDEX IF NOT EXISTS idx_users_phone ON users.users(phone);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users.users(email);
 
 -- ======================== AUTH: OTP (spec §7) ========================
-CREATE TABLE IF NOT EXISTS auth.otp_challenges (
+CREATE TABLE IF NOT EXISTS nm_auth.otp_challenges (
   challenge_id   text PRIMARY KEY,           -- CH_...
   user_id        text REFERENCES users.users(user_id),
   destination    text NOT NULL,              -- phone or email
@@ -46,10 +46,10 @@ CREATE TABLE IF NOT EXISTS auth.otp_challenges (
   created_at     timestamptz NOT NULL DEFAULT now(),
   expires_at     timestamptz NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_otp_destination ON auth.otp_challenges(destination, status);
+CREATE INDEX IF NOT EXISTS idx_otp_destination ON nm_auth.otp_challenges(destination, status);
 
 -- ==================== AUTH: SESSIONS (spec §9) ====================
-CREATE TABLE IF NOT EXISTS auth.sessions (
+CREATE TABLE IF NOT EXISTS nm_auth.sessions (
   session_id    text PRIMARY KEY,           -- NM_sess_...
   user_id       text NOT NULL REFERENCES users.users(user_id),
   refresh_hash  text NOT NULL,              -- sha256 of rotating refresh token
@@ -62,8 +62,8 @@ CREATE TABLE IF NOT EXISTS auth.sessions (
   last_used_at  timestamptz,
   expires_at    timestamptz NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_sessions_user ON auth.sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_sessions_refresh ON auth.sessions(refresh_hash);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON nm_auth.sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_refresh ON nm_auth.sessions(refresh_hash);
 
 -- ==================== MESSAGING (spec §13, §16) ====================
 CREATE TABLE IF NOT EXISTS messaging.chats (

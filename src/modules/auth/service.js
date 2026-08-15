@@ -33,12 +33,12 @@ export async function sendOtp({ channel, phone, email: emailAddr, purpose = 'log
   await withTransaction(async (c) => {
     // Invalidate any pending challenges to this destination.
     await c.query(
-      `UPDATE auth.otp_challenges SET status='superseded'
+      `UPDATE nm_auth.otp_challenges SET status='superseded'
        WHERE destination=$1 AND status='pending'`,
       [destination]
     );
     await c.query(
-      `INSERT INTO auth.otp_challenges
+      `INSERT INTO nm_auth.otp_challenges
          (challenge_id, destination, channel, purpose, otp_hash, expires_at, max_attempts, ip_address, device_id, status)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending')`,
       [chId, destination, channel, purpose, otpHash, expiresAt, config.otp.maxAttempts, ip, deviceId]
@@ -57,28 +57,28 @@ export async function sendOtp({ channel, phone, email: emailAddr, purpose = 'log
 // Verify a code. On success, upsert the user and issue a session (spec §5).
 export async function verifyOtp({ challengeId, code, ip, deviceId, userAgent }) {
   const { rows } = await query(
-    `SELECT * FROM auth.otp_challenges WHERE challenge_id=$1`,
+    `SELECT * FROM nm_auth.otp_challenges WHERE challenge_id=$1`,
     [challengeId]
   );
   const ch = rows[0];
   if (!ch) throw Errors.otpInvalid();
   if (ch.status !== 'pending') throw Errors.otpInvalid();
   if (new Date(ch.expires_at) < new Date()) {
-    await query(`UPDATE auth.otp_challenges SET status='expired' WHERE challenge_id=$1`, [challengeId]);
+    await query(`UPDATE nm_auth.otp_challenges SET status='expired' WHERE challenge_id=$1`, [challengeId]);
     throw Errors.otpExpired();
   }
   if (ch.attempt_count >= ch.max_attempts) {
-    await query(`UPDATE auth.otp_challenges SET status='locked' WHERE challenge_id=$1`, [challengeId]);
+    await query(`UPDATE nm_auth.otp_challenges SET status='locked' WHERE challenge_id=$1`, [challengeId]);
     throw Errors.otpLocked();
   }
 
   const okCode = await argon2.verify(ch.otp_hash, code).catch(() => false);
   if (!okCode) {
-    await query(`UPDATE auth.otp_challenges SET attempt_count=attempt_count+1 WHERE challenge_id=$1`, [challengeId]);
+    await query(`UPDATE nm_auth.otp_challenges SET attempt_count=attempt_count+1 WHERE challenge_id=$1`, [challengeId]);
     throw Errors.otpInvalid();
   }
 
-  await query(`UPDATE auth.otp_challenges SET status='used' WHERE challenge_id=$1`, [challengeId]);
+  await query(`UPDATE nm_auth.otp_challenges SET status='used' WHERE challenge_id=$1`, [challengeId]);
 
   // Find or create the user by destination (spec §8: internal immutable id).
   const isEmail = ch.channel === 'email';
@@ -112,7 +112,7 @@ export async function createSession({ userId, ip, deviceId, userAgent, scopes = 
   const { plaintext, hash } = newRefreshToken();
   const expiresAt = new Date(Date.now() + config.jwt.refreshTtl * 1000);
   await query(
-    `INSERT INTO auth.sessions (session_id, user_id, refresh_hash, device_id, user_agent, ip_address, scopes, expires_at, status)
+    `INSERT INTO nm_auth.sessions (session_id, user_id, refresh_hash, device_id, user_agent, ip_address, scopes, expires_at, status)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active')`,
     [sid, userId, hash, deviceId, userAgent, ip, scopes, expiresAt]
   );
@@ -123,12 +123,12 @@ export async function createSession({ userId, ip, deviceId, userAgent, scopes = 
 // Rotate refresh token; detect reuse of a revoked token (spec §9).
 export async function refresh({ refreshToken, ip, deviceId }) {
   const hash = hashRefresh(refreshToken);
-  const { rows } = await query(`SELECT * FROM auth.sessions WHERE refresh_hash=$1`, [hash]);
+  const { rows } = await query(`SELECT * FROM nm_auth.sessions WHERE refresh_hash=$1`, [hash]);
   const sess = rows[0];
   if (!sess) throw Errors.unauthorized('Invalid refresh token.');
   if (sess.status !== 'active') {
     // Reuse of a rotated/revoked token → revoke the whole session family (spec §9).
-    await query(`UPDATE auth.sessions SET status='revoked' WHERE user_id=$1`, [sess.user_id]);
+    await query(`UPDATE nm_auth.sessions SET status='revoked' WHERE user_id=$1`, [sess.user_id]);
     await audit({ actorUserId: sess.user_id, action: 'auth.refresh_reuse_detected', result: 'blocked', ip, device: deviceId });
     throw Errors.unauthorized('Refresh token reuse detected. All sessions revoked.');
   }
@@ -136,7 +136,7 @@ export async function refresh({ refreshToken, ip, deviceId }) {
 
   const { plaintext, hash: newHash } = newRefreshToken();
   await query(
-    `UPDATE auth.sessions SET refresh_hash=$1, status='active', last_used_at=now() WHERE session_id=$2`,
+    `UPDATE nm_auth.sessions SET refresh_hash=$1, status='active', last_used_at=now() WHERE session_id=$2`,
     [newHash, sess.session_id]
   );
   const accessToken = issueAccessToken({ userId: sess.user_id, sessionId: sess.session_id, scopes: sess.scopes });
@@ -144,20 +144,20 @@ export async function refresh({ refreshToken, ip, deviceId }) {
 }
 
 export async function logout({ sessionId }) {
-  await query(`UPDATE auth.sessions SET status='revoked' WHERE session_id=$1`, [sessionId]);
+  await query(`UPDATE nm_auth.sessions SET status='revoked' WHERE session_id=$1`, [sessionId]);
 }
 
 export async function listSessions({ userId }) {
   const { rows } = await query(
     `SELECT session_id, device_id, user_agent, ip_address, created_at, last_used_at, status
-     FROM auth.sessions WHERE user_id=$1 ORDER BY last_used_at DESC NULLS LAST, created_at DESC`,
+     FROM nm_auth.sessions WHERE user_id=$1 ORDER BY last_used_at DESC NULLS LAST, created_at DESC`,
     [userId]
   );
   return rows;
 }
 
 export async function revokeSession({ userId, sessionId }) {
-  await query(`UPDATE auth.sessions SET status='revoked' WHERE session_id=$1 AND user_id=$2`, [sessionId, userId]);
+  await query(`UPDATE nm_auth.sessions SET status='revoked' WHERE session_id=$1 AND user_id=$2`, [sessionId, userId]);
 }
 
 function defaultScopes() {
