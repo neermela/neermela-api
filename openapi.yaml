@@ -1,0 +1,333 @@
+openapi: 3.1.0
+info:
+  title: NeerMela API
+  version: 1.0.0
+  description: >
+    NeerMela Universal API Platform — v1 foundation. API-first modular monolith.
+    Every response is enveloped and carries a request_id (spec §58/§59).
+servers:
+  - url: https://api.neermela.com/v1
+    description: Production
+  - url: http://localhost:8080/v1
+    description: Local
+tags:
+  - name: Auth
+  - name: Users
+  - name: Messaging
+  - name: Media
+  - name: Health
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Envelope:
+      type: object
+      properties:
+        success: { type: boolean }
+        data: { type: object }
+        request_id: { type: string, example: REQ_01HX8K9X }
+    Error:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        error:
+          type: object
+          properties:
+            code: { type: string, example: OTP_EXPIRED }
+            message: { type: string, example: Verification code has expired. }
+            request_id: { type: string }
+    User:
+      type: object
+      properties:
+        user_id: { type: string, example: NM_usr_01HX8K9X }
+        username: { type: string, example: elyas }
+        display_name: { type: string }
+        phone: { type: [string, "null"] }
+        email: { type: [string, "null"] }
+        profile_photo: { type: [string, "null"] }
+        verification_status: { type: string, enum: [none, verified, business] }
+    Message:
+      type: object
+      properties:
+        message_id: { type: string }
+        chat_id: { type: string }
+        sender_user_id: { type: string }
+        type: { type: string }
+        body: { type: [string, "null"] }
+        status: { type: string, enum: [sent, delivered, read, deleted, failed] }
+        created_at: { type: string, format: date-time }
+  responses:
+    Err:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string }
+      description: Prevents duplicate creation on retry (spec §60).
+    DeviceId:
+      name: X-Device-Id
+      in: header
+      required: false
+      schema: { type: string }
+
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/otp/send:
+    post:
+      tags: [Auth]
+      summary: Send a login/verify OTP over SMS or email
+      security: []
+      parameters: [{ $ref: '#/components/parameters/DeviceId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channel]
+              properties:
+                channel: { type: string, enum: [sms, email] }
+                phone: { type: string, example: "+971501234567" }
+                email: { type: string, format: email }
+                purpose: { type: string, enum: [login, verify, reset], default: login }
+      responses:
+        '200':
+          description: OTP dispatched
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          challenge_id: { type: string, example: CH_01HX8K9X }
+                          expires_in: { type: integer, example: 300 }
+        '429': { $ref: '#/components/responses/Err' }
+
+  /auth/otp/verify:
+    post:
+      tags: [Auth]
+      summary: Verify OTP → creates/logs in the user and issues a session
+      security: []
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challenge_id, code]
+              properties:
+                challenge_id: { type: string }
+                code: { type: string, example: "483921" }
+      responses:
+        '201':
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          user: { $ref: '#/components/schemas/User' }
+                          access_token: { type: string }
+                          refresh_token: { type: string }
+                          expires_in: { type: integer }
+                          is_new: { type: boolean }
+        '400': { $ref: '#/components/responses/Err' }
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotate the refresh token and get a fresh access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [refresh_token], properties: { refresh_token: { type: string } } }
+      responses:
+        '200': { description: New tokens, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+        '401': { $ref: '#/components/responses/Err' }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke the current session
+      responses: { '200': { description: OK } }
+
+  /auth/sessions:
+    get:
+      tags: [Auth]
+      summary: List active sessions / linked devices
+      responses: { '200': { description: OK } }
+  /auth/sessions/{sessionId}:
+    delete:
+      tags: [Auth]
+      summary: Revoke a specific session
+      parameters: [{ name: sessionId, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+
+  /users/me:
+    get:
+      tags: [Users]
+      summary: Get my profile
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } }
+    patch:
+      tags: [Users]
+      summary: Update my profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name: { type: string }
+                username: { type: string }
+                bio: { type: string }
+                profile_photo: { type: string }
+                language: { type: string, enum: [bn, en, ar] }
+      responses: { '200': { description: OK } }
+    delete:
+      tags: [Users]
+      summary: Schedule account deletion (spec §67)
+      responses: { '200': { description: OK } }
+
+  /users/{userId}:
+    get:
+      tags: [Users]
+      summary: Get a public profile by id or @username
+      parameters: [{ name: userId, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK }, '404': { $ref: '#/components/responses/Err' } }
+
+  /chats:
+    get:
+      tags: [Messaging]
+      summary: List my chats
+      responses: { '200': { description: OK } }
+    post:
+      tags: [Messaging]
+      summary: Create or fetch a DM/group chat
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [member_ids]
+              properties:
+                type: { type: string, enum: [dm, group], default: dm }
+                member_ids: { type: array, items: { type: string } }
+                title: { type: string }
+      responses: { '201': { description: Created } }
+
+  /chats/{chatId}/messages:
+    get:
+      tags: [Messaging]
+      summary: List messages (cursor pagination)
+      parameters:
+        - { name: chatId, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 100 } }
+        - { name: before, in: query, schema: { type: string, format: date-time } }
+      responses: { '200': { description: OK } }
+    post:
+      tags: [Messaging]
+      summary: Send a message (fans out over WebSocket)
+      parameters:
+        - { name: chatId, in: path, required: true, schema: { type: string } }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type: { type: string, enum: [text, image, video, audio, voice, document, location, contact, sticker, gif], default: text }
+                body: { type: string }
+                media_id: { type: string }
+                reply_to: { type: string }
+      responses: { '201': { description: Created } }
+
+  /messages/{messageId}:
+    patch:
+      tags: [Messaging]
+      summary: Edit a message
+      parameters: [{ name: messageId, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+    delete:
+      tags: [Messaging]
+      summary: Delete a message
+      parameters: [{ name: messageId, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+
+  /messages/{messageId}/read:
+    post:
+      tags: [Messaging]
+      summary: Mark a message read
+      parameters: [{ name: messageId, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+
+  /media/upload/init:
+    post:
+      tags: [Media]
+      summary: Get a signed URL to upload directly to storage (spec §21)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content_type]
+              properties:
+                content_type: { type: string, example: image/jpeg }
+                size: { type: integer }
+      responses: { '201': { description: Signed URL returned } }
+  /media/upload/complete:
+    post:
+      tags: [Media]
+      summary: Confirm an upload finished
+      responses: { '200': { description: OK } }
+  /media/{mediaId}:
+    get:
+      tags: [Media]
+      summary: Resolve media metadata + URL
+      parameters: [{ name: mediaId, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness
+      security: []
+      responses:
+        '200':
+          description: Healthy
+          content:
+            application/json:
+              schema: { type: object, properties: { status: { type: string, example: healthy }, version: { type: string } } }
+  /ready:
+    get:
+      tags: [Health]
+      summary: Readiness (db + redis)
+      security: []
+      responses: { '200': { description: Ready }, '503': { description: Degraded } }
