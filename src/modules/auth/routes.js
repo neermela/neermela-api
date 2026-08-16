@@ -18,6 +18,12 @@ r.post('/otp/send', rateLimit('otp'), async (req, res, next) => {
   try {
     const p = sendSchema.parse(req.body);
     const out = await auth.sendOtp({ ...p, ...meta(req) });
+    // TEST MODE: when OTP_DEBUG_RETURN=true, include the code so login works
+    // without a live SMS gateway. Remove this env var once real SMS is wired.
+    if (process.env.OTP_DEBUG_RETURN === 'true' && out && out.debug_code) {
+      out.dev_code = out.debug_code;
+    }
+    if (out) delete out.debug_code;
     ok(res, out);
   } catch (e) { next(zodOr(e)); }
 });

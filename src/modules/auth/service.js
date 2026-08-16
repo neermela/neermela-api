@@ -51,7 +51,7 @@ export async function sendOtp({ channel, phone, email: emailAddr, purpose = 'log
 
   await redis.set(cdKey, '1', 'EX', config.otp.resendCooldown);
 
-  return { challenge_id: chId, channel, destination_masked: mask(destination), expires_in: config.otp.ttlSeconds };
+  return { challenge_id: chId, channel, destination_masked: mask(destination), expires_in: config.otp.ttlSeconds, debug_code: code };
 }
 
 // Verify a code. On success, upsert the user and issue a session (spec §5).
