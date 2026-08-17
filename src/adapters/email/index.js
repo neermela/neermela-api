@@ -4,7 +4,7 @@
 //
 // Render env vars to set:
 //   EMAIL_PROVIDER = resend
-//   RESEND_API_KEY = re_xxxxxxxxxxxxxxxxxxxx
+//   RESEND_API_KEY = re_
 //   EMAIL_FROM     = NeerMela <noreply@neermela.com>   (after you verify the domain in Resend)
 //                    (for a quick test before domain verify, leave EMAIL_FROM unset — it falls
 //                     back to onboarding@resend.dev, which only delivers to your own Resend email)
